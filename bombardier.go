@@ -72,6 +72,9 @@ func newBombardier(c config) (*bombardier, error) {
 		b.bar.ShowCounters = false
 		b.bar.ShowPercent = false
 	}
+	if c.nobar == true {
+		b.bar.NotPrint = true
+	} 
 	b.bar.ManualUpdate = true
 
 	if b.conf.testType() == counted {

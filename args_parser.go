@@ -28,6 +28,7 @@ type kingpinParser struct {
 	body         string
 	bodyFilePath string
 	stream       bool
+	nobar        bool
 	certPath     string
 	keyPath      string
 	rate         *nullableUint64
@@ -46,6 +47,7 @@ func newKingpinParser() argsParser {
 		body:         "",
 		bodyFilePath: "",
 		stream:       false,
+		nobar:        false,
 		certPath:     "",
 		keyPath:      "",
 		insecure:     false,
@@ -84,6 +86,9 @@ func newKingpinParser() argsParser {
 		"chunked transfer encoding or to serve it from memory").
 		Short('s').
 		BoolVar(&kparser.stream)
+	app.Flag("nobar", "Specify whether to display progress bar").
+		Short('Q').
+		BoolVar(&kparser.nobar)
 	app.Flag("cert", "Path to the client's TLS Certificate").
 		Default("").
 		StringVar(&kparser.certPath)
@@ -157,6 +162,7 @@ func (k *kingpinParser) parse(args []string) (config, error) {
 		body:           k.body,
 		bodyFilePath:   k.bodyFilePath,
 		stream:         k.stream,
+		nobar:          k.nobar,
 		keyPath:        k.keyPath,
 		certPath:       k.certPath,
 		printLatencies: k.latencies,
