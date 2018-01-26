@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"os/signal"
 	"sort"
@@ -415,6 +416,9 @@ func (b *bombardier) disableOutput() {
 }
 
 func main() {
+	
+	rand.Seed( time.Now().Unix() );
+	
 	cfg, err := parser.parse(os.Args)
 	if err != nil {
 		fmt.Println(err)

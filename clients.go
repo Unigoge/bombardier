@@ -9,10 +9,94 @@ import (
 	"strings"
 	"time"
 
+	"math/rand"
+	"strconv"
+	"bytes"
+
 	"github.com/goware/urlx"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http2"
 )
+
+func processUrl( url string ) string {
+
+	var new_url string;
+    new_url = string( url );
+
+    url_len := len(new_url);
+	
+	for url_len > 0 {
+	
+		var buffer bytes.Buffer;
+		
+		idx := strings.Index( new_url, "@@RAND-" );
+		if( idx != -1 ) {
+	
+			url_len := len(new_url);
+		
+			buffer.Write( []byte(new_url)[0:idx] );
+			// fmt.Printf( "%s\n", buffer.String() );
+			
+			idx1 := idx + 7;
+		
+			str_num1 := string("");		
+			for ; idx1 < url_len; idx1++ {
+				if( new_url[idx1] == '-' ) {
+					str_num1 = string( []byte(new_url)[idx+7:idx1] );
+					// fmt.Printf( "%s\n", str_num1 );
+					break;
+				}
+				if(( new_url[idx1] == '/' ) || ( new_url[idx1] == '/' ) ) {
+					break;
+				} 
+			}
+			
+			if( str_num1 == "" ) {
+				return string( url )
+			}
+		
+			idx2 := idx1 + 1;
+			str_num2 := string("");
+			for ; idx2 < url_len; idx2++ {
+				if( ( new_url[idx2] == '/' ) || ( new_url[idx2] == '.' ) ) {
+					str_num2 = string( []byte(new_url)[idx1+1:idx2] );
+					// fmt.Printf( "%s\n", str_num2 );
+					break;
+				}
+				if( new_url[idx2] == '-' ) {
+					break;
+				} 
+			}
+			if( str_num2 == "" ) {
+				return string( url );
+			}
+		
+			num1, err1 := strconv.Atoi(str_num1);
+			num2, err2 := strconv.Atoi(str_num2);
+		
+			if( err1 != nil ) {
+				return string( url );
+			}
+
+			if( err2 != nil ) {
+				return string( url );
+			}
+				
+			num := rand.Intn( num2 - num1 );
+		
+			buffer.WriteString( strconv.Itoa( num1 + num ) );
+			buffer.Write( []byte(new_url)[idx2:url_len]  );
+			new_url = buffer.String();
+			// fmt.Printf( "%s\n", new_url );		
+		
+		} else {
+			break;
+		}
+	
+	}
+	
+	return new_url;
+}
 
 type client interface {
 	do() (code int, msTaken uint64, err error)
@@ -74,7 +158,9 @@ func (c *fasthttpClient) do() (
 		c.headers.CopyTo(&req.Header)
 	}
 	req.Header.SetMethod(c.method)
-	req.SetRequestURI(c.url)
+	
+	url := processUrl( c.url ); 
+	req.SetRequestURI( url)
 	if c.body != nil {
 		req.SetBodyString(*c.body)
 	} else {
@@ -107,6 +193,7 @@ type httpClient struct {
 
 	headers http.Header
 	url     *url.URL
+	url_raw string
 	method  string
 
 	body    *string
@@ -141,6 +228,7 @@ func newHTTPClient(opts *clientOpts) client {
 	c.method, c.body, c.bodProd = opts.method, opts.body, opts.bodProd
 	var err error
 	c.url, err = urlx.Parse(opts.url)
+	c.url_raw = opts.url
 	if err != nil {
 		// opts.url guaranteed to be valid at this point
 		panic(err)
@@ -156,8 +244,13 @@ func (c *httpClient) do() (
 
 	req.Header = c.headers
 	req.Method = c.method
-	req.URL = c.url
-
+	
+	var url_err error
+	req.URL, url_err = urlx.Parse( processUrl( c.url_raw ) );
+	if url_err != nil {
+		panic(err)
+	}
+	
 	if host := req.Header.Get("Host"); host != "" {
 		req.Host = host
 	}
