@@ -12,68 +12,61 @@ import (
 	"math/rand"
 	"strconv"
 	"bytes"
+	"sync/atomic"
 
 	"github.com/goware/urlx"
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http2"
 )
 
-func processUrl( url string ) string {
+type update_number func(int, int) uint64
 
-	var new_url string;
-    new_url = string( url );
+func updateUrl( url string, tag string, fn update_number ) string {
 
-    url_len := len(new_url);
-	
-	for url_len > 0 {
-	
 		var buffer bytes.Buffer;
-		
-		idx := strings.Index( new_url, "@@RAND-" );
+
+		idx := strings.Index( url, tag );
 		if( idx != -1 ) {
-	
-			url_len := len(new_url);
-		
-			buffer.Write( []byte(new_url)[0:idx] );
-			// fmt.Printf( "%s\n", buffer.String() );
-			
+
+			url_len := len(url);
+
+			buffer.Write( []byte(url)[0:idx] );
+
 			idx1 := idx + 7;
-		
-			str_num1 := string("");		
+
+			str_num1 := string("");
 			for ; idx1 < url_len; idx1++ {
-				if( new_url[idx1] == '-' ) {
-					str_num1 = string( []byte(new_url)[idx+7:idx1] );
-					// fmt.Printf( "%s\n", str_num1 );
+				if( url[idx1] == '-' ) {
+					str_num1 = string( []byte(url)[idx+7:idx1] );
 					break;
 				}
-				if(( new_url[idx1] == '/' ) || ( new_url[idx1] == '/' ) ) {
+				if(( url[idx1] == '/' ) || ( url[idx1] == '.' ) ) {
 					break;
-				} 
+				}
 			}
-			
+
 			if( str_num1 == "" ) {
 				return string( url )
 			}
-		
+
 			idx2 := idx1 + 1;
 			str_num2 := string("");
 			for ; idx2 < url_len; idx2++ {
-				if( ( new_url[idx2] == '/' ) || ( new_url[idx2] == '.' ) ) {
-					str_num2 = string( []byte(new_url)[idx1+1:idx2] );
-					// fmt.Printf( "%s\n", str_num2 );
+				if( ( url[idx2] == '/' ) || ( url[idx2] == '.' ) ) {
+					str_num2 = string( []byte(url)[idx1+1:idx2] );
 					break;
 				}
-				if( new_url[idx2] == '-' ) {
+				if( url[idx2] == '-' ) {
 					break;
-				} 
+				}
 			}
 			if( str_num2 == "" ) {
 				return string( url );
 			}
-		
+
 			num1, err1 := strconv.Atoi(str_num1);
 			num2, err2 := strconv.Atoi(str_num2);
-		
+
 			if( err1 != nil ) {
 				return string( url );
 			}
@@ -81,20 +74,72 @@ func processUrl( url string ) string {
 			if( err2 != nil ) {
 				return string( url );
 			}
-				
-			num := rand.Intn( num2 - num1 );
-		
-			buffer.WriteString( strconv.Itoa( num1 + num ) );
-			buffer.Write( []byte(new_url)[idx2:url_len]  );
-			new_url = buffer.String();
-			// fmt.Printf( "%s\n", new_url );		
-		
+
+			num := fn( num1, num2 );
+
+			buffer.WriteString( strconv.Itoa( num1 + int(num) ) );
+			buffer.Write( []byte(url)[idx2:url_len] );
+			new_url := buffer.String();
+
+			return new_url;
 		} else {
-			break;
+			return url;
 		}
-	
+}
+
+func getSeqNfromUrl( url string, seq_tag string ) uint64 {
+
+			var seq_num uint64;
+			seq_num = 1;
+			updateUrl( url, seq_tag, func(num1 int, num2 int ) uint64 {
+				seq_num = 1;
+				if( num2 > num1 ) {
+					seq_num = uint64(num2) - uint64(num1);
+				}
+				return seq_num;
+			});
+			return seq_num;
+}
+
+func processUrl( url string, cnt *uint64, seqy uint64  ) string {
+
+	var new_url string;
+        new_url = string( url );
+
+        url_len := len(new_url);
+
+	for url_len > 0 {
+
+		idx := strings.Index( new_url, "@@RAND-" );
+		if( idx != -1 ) {
+
+			new_url = updateUrl( new_url, "@@RAND-", func(num1 int, num2 int ) uint64 {
+				return uint64( rand.Intn( num2 - num1 ) );
+			});
+
+			url_len = len( new_url );
+
+		} else {
+
+			new_url = updateUrl( new_url, "@@SEQY-", func(num1 int, num2 int ) uint64 {
+				curr_cnt := atomic.AddUint64(cnt, 1);
+				curr_cnt = curr_cnt - 1;
+
+				return curr_cnt % uint64( num2 - num1 );
+			});
+
+			new_url = updateUrl( new_url, "@@SEQX-", func(num1 int, num2 int ) uint64 {
+				curr_cnt := atomic.AddUint64(cnt, 1);
+				curr_cnt = curr_cnt - 1;
+
+				return (curr_cnt / seqy) % uint64( num2 - num1 );
+			});
+
+			break;
+
+		}
 	}
-	
+
 	return new_url;
 }
 
@@ -126,6 +171,8 @@ type fasthttpClient struct {
 	headers     *fasthttp.RequestHeader
 	url, method string
 
+	cnt, seqy uint64
+
 	body    *string
 	bodProd bodyStreamProducer
 }
@@ -145,6 +192,9 @@ func newFastHTTPClient(opts *clientOpts) client {
 	c.headers = headersToFastHTTPHeaders(opts.headers)
 	c.url, c.method, c.body = opts.url, opts.method, opts.body
 	c.bodProd = opts.bodProd
+	c.cnt = 0
+	c.seqy = getSeqNfromUrl( c.url, "@@SEQY-" )
+
 	return client(c)
 }
 
@@ -158,8 +208,8 @@ func (c *fasthttpClient) do() (
 		c.headers.CopyTo(&req.Header)
 	}
 	req.Header.SetMethod(c.method)
-	
-	url := processUrl( c.url ); 
+
+	url := processUrl( c.url, &c.cnt, c.seqy );
 	req.SetRequestURI( url)
 	if c.body != nil {
 		req.SetBodyString(*c.body)
@@ -195,6 +245,8 @@ type httpClient struct {
 	url     *url.URL
 	url_raw string
 	method  string
+
+	cnt, seqy uint64
 
 	body    *string
 	bodProd bodyStreamProducer
@@ -234,6 +286,9 @@ func newHTTPClient(opts *clientOpts) client {
 		panic(err)
 	}
 
+	c.cnt = 0
+	c.seqy = getSeqNfromUrl( c.url_raw, "@@SEQY-" )
+
 	return client(c)
 }
 
@@ -244,13 +299,13 @@ func (c *httpClient) do() (
 
 	req.Header = c.headers
 	req.Method = c.method
-	
+
 	var url_err error
-	req.URL, url_err = urlx.Parse( processUrl( c.url_raw ) );
+	req.URL, url_err = urlx.Parse( processUrl( c.url_raw, &c.cnt, c.seqy ) );
 	if url_err != nil {
 		panic(err)
 	}
-	
+
 	if host := req.Header.Get("Host"); host != "" {
 		req.Host = host
 	}
