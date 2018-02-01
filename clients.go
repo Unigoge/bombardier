@@ -103,6 +103,9 @@ func getSeqNfromUrl( url string, seq_tag string ) uint64 {
 
 func processUrl( url string, cnt *uint64, seqy uint64  ) string {
 
+	curr_cnt := atomic.AddUint64(cnt, 1);
+	curr_cnt = curr_cnt - 1;
+
 	var new_url string;
         new_url = string( url );
 
@@ -122,15 +125,11 @@ func processUrl( url string, cnt *uint64, seqy uint64  ) string {
 		} else {
 
 			new_url = updateUrl( new_url, "@@SEQY-", func(num1 int, num2 int ) uint64 {
-				curr_cnt := atomic.AddUint64(cnt, 1);
-				curr_cnt = curr_cnt - 1;
 
 				return curr_cnt % uint64( num2 - num1 );
 			});
 
 			new_url = updateUrl( new_url, "@@SEQX-", func(num1 int, num2 int ) uint64 {
-				curr_cnt := atomic.AddUint64(cnt, 1);
-				curr_cnt = curr_cnt - 1;
 
 				return (curr_cnt / seqy) % uint64( num2 - num1 );
 			});
